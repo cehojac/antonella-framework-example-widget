@@ -1,0 +1,443 @@
+#!/usr/bin/env php
+<?php
+
+class Antonella
+{  
+    public $dir=__DIR__;
+
+    protected $files_to_exclude=[
+        '.gitignore',
+        '.gitmodules',
+        '.gitattributes',
+        '.travis.yml',
+        'composer.json',
+        'composer.lock',
+        'package.json',
+        'package-lock.json',
+        'antonella',
+        'readme.md', 
+        'bitbucket-pipelines.yml', 
+        'CHANGELOG.md',
+        'CONTRIBUTING.md',
+        'Gruntfile.js',
+        'LICENSE',
+        'readme.md',
+        'README.md',
+        'readme.txt',
+        'bitbucket-pipelines.yml'
+    ];
+
+    protected $dirs_to_exclude_win=[
+        '.',
+        '..',
+        '.git',
+        '.github',
+    ];
+    protected $dirs_to_exclude_linux=[
+        '.git',
+        '.github',
+    ];
+   
+    public function process($data)
+    {
+        switch ($data[1])
+        {
+            case 'makeup':
+                return $this->makeup();
+                break;
+            case 'namespace':
+                return $this->newname($data);
+                break;
+            case 'make':
+                return $this->makeController($data);
+                break;
+            case 'widget':
+                return $this->MakeWidget($data);
+                break;
+            case 'remove':
+                return $this->Remove($data);
+                break;
+            case 'add':
+                return $this->Add($data);
+                break;
+            case 'help':
+                return $this->Help();
+            default:
+                echo("Antonella no understand you. please read the manual in https://antonellaframework.com");
+                exit();
+        }
+    }
+    public function read_namespace()
+    {
+        $composer= file_get_contents($this->dir."/composer.json");
+        $composer_json=json_decode($composer);
+        $psr=$composer_json->autoload->{"psr-4"};
+        $namespace=substr(key($psr),0,-1);
+        return $namespace;
+    }
+    public function makeup()
+    {
+        echo("Antonella is packing the plugin \n");
+        $SO=strtoupper(substr(PHP_OS, 0, 3));
+        if($SO==='WIN')
+        {
+            $this->makeup_win();
+        }
+        else
+        {
+            $this->makeup_linux();
+        }
+        echo("The plugin's zip file is OK!"); 
+    }
+
+    public function makeup_win()
+    {
+
+        file_exists($this->dir.'/'.basename($this->dir).'.zip')?unlink($this->dir.'/'.basename($this->dir).'.zip'):false;
+        $zip = new ZipArchive(); 
+        $zip->open(basename($this->dir).'.zip', ZipArchive::CREATE); 
+
+        $dirName =$this->dir; 
+
+        if (!is_dir($dirName)) { 
+            throw new Exception('Directory ' . $dirName . ' does not exist'); 
+        } 
+
+        $dirName = realpath($dirName); 
+        if (substr($dirName, -1) != '/') { 
+            $dirName.= '/'; 
+        } 
+
+        /* 
+        * NOTE BY danbrown AT php DOT net: A good method of making 
+        * portable code in this case would be usage of the PHP constant 
+        * DIRECTORY_SEPARATOR in place of the '/' (forward slash) above. 
+        */ 
+
+        $dirStack = array($dirName); 
+        //Find the index where the last dir starts 
+        $cutFrom = strrpos(substr($dirName, 0, -1), '/')+strlen($this->dir)+1; 
+
+        while (!empty($dirStack)) { 
+            $currentDir = array_pop($dirStack); 
+            $filesToAdd = array(); 
+
+            $dir = dir($currentDir); 
+           
+            while (false !== ($node = $dir->read())) { 
+             
+                if(in_array($node,$this->files_to_exclude)||in_array($node,$this->dirs_to_exclude_win)){
+                    continue; 
+                } 
+                if (is_dir($currentDir . $node)) { 
+                   
+                    array_push($dirStack, $currentDir . $node . '/'); 
+                } 
+                if (is_file($currentDir . $node)) { 
+                    $filesToAdd[] = $node; 
+                } 
+            } 
+
+            $localDir = substr($currentDir, $cutFrom);
+            
+           
+            $zip->addEmptyDir($localDir); 
+            foreach ($filesToAdd as $file) { 
+                $zip->addFile($currentDir . $file, $localDir . $file);
+                echo("Added $localDir$file into plugin  \n"); 
+            } 
+        } 
+
+        $zip->close();
+        
+    }
+
+    public function makeup_linux()
+    {
+
+
+        file_exists($this->dir.'/'.basename($this->dir).'.zip')?unlink($this->dir.'/'.basename($this->dir).'.zip'):false;
+
+        $zip = new ZipArchive(); 
+        $zip->open(basename($this->dir).'.zip', ZipArchive::CREATE); 
+
+        $dirName = $this->dir; 
+
+        if (!is_dir($dirName)) { 
+            throw new Exception('Directory ' . $dirName . ' does not exist'); 
+        } 
+
+        $dirName = realpath($dirName); 
+        $filesToExclude = $this->files_to_exclude;
+        $dirToExclude = $this->dirs_to_exclude_linux;
+
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dirName),
+            RecursiveIteratorIterator::LEAVES_ONLY
+        );
+
+        foreach($files as $name => $file )
+        {
+            
+            if (!$file->isDir() && !in_array($file->getFilename(), $filesToExclude)){
+                    $filePath = $file->getRealPath();
+                    $relativePath = substr($filePath, strlen($dirName) + 1);
+                    // Add current file to archive
+                    $zip->addFile($filePath, $relativePath);  
+            }
+
+        }       
+
+        for($i=0;$i<$zip->numFiles;$i++){
+            $entry_info = $zip->statIndex($i);
+            foreach($dirToExclude as $dirExclude) {
+                $pos = strpos($entry_info["name"], $dirExclude);
+                if($pos !== false) {
+                    $zip->deleteIndex($i);
+                }    
+            }
+            
+            
+        }
+
+        $zip->close();
+           
+    }
+
+    public function newname($data)
+    {
+        echo("Renaming the namespace... \n");
+        $newname    = (isset($data[2])&&trim($data[2])<>'')?$data[2]:strtoupper(substr('ABCDEFGHIJKLMNOPQRSTUVWXYZ',rand(1,26),5));
+        $slash      = DIRECTORY_SEPARATOR;
+        $composer   = file_get_contents($this->dir.$slash."composer.json");
+        $namespace  = $this->read_namespace();
+        $core       = file_get_contents($this->dir.$slash."antonella-framework.php");
+        $core       = str_replace($namespace,$newname,$core);
+        $composer   = str_replace($namespace,$newname,$composer);
+        file_put_contents($this->dir.$slash."antonella-framework.php",$core);
+        file_put_contents($this->dir.$slash."composer.json",$composer);
+        $dirName    = $this->dir.$slash."src";
+        $dirName    = realpath($dirName); 
+        if (substr($dirName, -1) != '/') { 
+            $dirName.= $slash; 
+        }
+        $dirStack   = array($dirName);
+        while (!empty($dirStack)) { 
+            $currentDir = array_pop($dirStack); 
+            $filesToAdd = array(); 
+            $dir = dir($currentDir);
+            while (false !== ($node = $dir->read())) { 
+                if (($node == '..') || ($node == '.')) 
+                { 
+                    continue; 
+                } 
+                if (is_dir($currentDir . $node)) { 
+                    array_push($dirStack, $currentDir . $node . $slash); 
+                } 
+                if (is_file($currentDir . $node)) { 
+                    $file=file_get_contents($currentDir.$node);
+                    $file= str_replace($namespace,$newname,$file);
+                    file_put_contents($currentDir.$node,$file);
+                } 
+            } 
+        }
+        exec("composer dump-autoload");
+        exit ("The new namespace is $newname ");
+    }
+
+    public function makecontroller($data)
+    {
+        $namespace=$this->read_namespace();
+        $input=
+"<?php
+    namespace $namespace;
+          
+    class $data[2]
+    {
+    
+        public function __construct()
+        {
+    
+        }
+    }";
+        file_put_contents(__DIR__."/src/$data[2].php", $input);
+        exit("Controller $data[2].php created into src folder");
+    }
+
+    public function MakeWidget($data)
+    {
+        $namespace=$this->read_namespace();
+        $input=
+"<?php
+namespace $namespace;
+      
+class $data[2] extends \WP_Widget
+{
+    /**
+     * Please complete the public variables
+    */
+    public \$name_widget=''; // <--complete this
+
+    public \$options=
+    [
+        'classname'=>'', // <-- complete this
+        'description'=>'' // <-- complete this
+    ];
+
+    public \$form_values=
+    [
+        //Example: 'title'=>'the best plugin', 'url'=>'https://antonellaframework.com'
+    ];
+   
+    
+    public function __construct()
+    {
+        \$this->WP_Widget('$data[2]', \$this->name_widget, \$this->options);
+    }
+
+    function form(\$instance) {
+        // Build the Admin's Widget form
+        \$instance = wp_parse_args((array)\$instance, \$this->form_values);
+        \$html=\"\";
+        foreach (\$instance as \$key=>\$inst)
+        {
+            \$html.=\"<p>\$key<input class='widefat' type='text' name='{\$this->get_field_name(\$key)}' value='\".esc_attr(\$inst).\"'/></p>\";
+        }
+        echo \$html;
+    }
+    function update(\$new_instance, \$old_instance) {
+        // Save the Widget Options
+        \$instances = \$old_instance;
+        foreach(\$new_instance as \$key => \$value)
+        {
+            \$instances[\$key]= sanitize_text_field(\$new_instance[\$key]);
+        }
+        return \$instances;
+    }
+    function widget(\$args, \$instance) {
+        //Build the code for show the widget in plubic zone.
+        extract(\$args);
+        \$html=\"\";
+        // you can edit this function for make the html//
+        //
+        ////////////////////////////////////////////////
+        echo \$html;
+    }
+
+}";
+    file_put_contents(__DIR__."/src/$data[2].php", $input);
+    exit("The Widget $data[2].php created info src folder");
+    }
+
+    public function Remove($data)
+    {
+        switch ($data[2])
+        {
+            case 'blade':
+                return $this->RemoveBlade();
+                break;
+            default:
+                echo("Antonella no understand you. please read the manual in https://antonellaframework.com");
+                exit();
+        }
+    }
+    public function Add($data)
+    {
+        switch ($data[2])
+        {
+            case 'blade':
+                return $this->AddBlade();
+                break;
+            default:
+                echo("Antonella no understand you. please read the manual in https://antonellaframework.com");
+                exit();
+        }
+    }
+    public function RemoveBlade()
+    {
+        echo("Removing Blade... \n");
+        exec('composer remove jenssegers/blade');
+        echo("Blade Removed! \n");
+    }
+    public function AddBlade()
+    {
+        echo("Adding Blade... \n");
+        exec('composer require jenssegers/blade');
+        echo("Blade Added! \n");
+    }
+
+    public function Help()
+    {
+        $this->AntonellaLogo();
+        echo(" \n");
+        echo("\033[01;33m Usage:  \033[0m \n");
+        echo("\033[01;37m php antonella [option] [name or value] \033[0m \n");
+        echo(" \n");
+        echo("\033[01;33m Options: \033[0m \n");
+        echo("\033[01;32m    namespace: \033[0m");
+        echo("\033[01;37m                     Generate or regenerate a new namespace for your plugin project. \033[0m \n");
+        echo("\033[01;32m    makeup \033[0m");
+        echo("\033[01;37m                         Compress and generate a .zip plugin's file for upload to WordPress. \033[0m \n");
+        echo("\033[01;32m    make \033[0m");
+        echo("\033[01;37m                           Generate a new php Controller's file. \033[0m \n");
+        echo("\033[01;32m    remove \033[0m");
+        echo("\033[01;37m                         Remove Antonella's Modules. Now only is possible remove blade \033[0m \n");
+        echo("\033[01;32m    add \033[0m");
+        echo("\033[01;37m                            Add Antonella's Modules. Now only is possible add blade \033[0m \n");
+        echo("\033[01;32m    widget \033[0m");
+        echo("\033[01;37m                         Generate a new php file's Class for use Widget \033[0m \n");
+        echo(" \n");
+        echo(" \n");
+        echo("\033[01;37m All Documentation in https://antonellaframework.com \033[0m \n");
+        echo("\033[01;37m See Video Tutorial in https://tipeos.com/anto \033[0m \n");
+       // $this->AntonellaIcon();
+    }
+
+    public function AntonellaIcon()
+    {
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMMMMMMMMMMMmymMMMMMMMMMMNhmMMMMMMMMMMMMMMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMMMMMMMMh+.``.:omMMMMmy+/:::ohMMMMMMMMMMMMMMMMMMMMMMMM  \033[0m \n"); 
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMMMMms:.`````..-:NMMN:///::::::+smMMMMMMMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMdo:.`````.-:://:NMMN:///:::::::::+shNMMMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMNy+.``````.-://////:NMMN:///:::::::::::::ohNMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMms:``````..-:////////ydMMMN:::-..--::::::::::::/smMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMNy/-``````.-:////////+ydMMMMMMM+.``````.--:::::::::::::ohNMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMh/.``````.-:////////+ymMMMMMMMMMMMMdo-.`````..-:::::::::::::+hMMMM  \033[0m \n");
+        echo("\033[01;33m MMMM+:-..`````..-:///ohNMMMMMMMMMMMMMMMMMMms/.``````.--::::::::::+MMMM  \033[0m \n");
+        echo("\033[01;33m MMMM+::::--.``````.-smMMMMMMMMMMMMMMMMMMMMMMMNh+-``````..-:::::::+MMMM  \033[0m \n");
+        echo("\033[01;33m MMMM+::::::::-..``````-odMMMMMMMMMMMMMMMMMMMMMMMMy:-.`````..--:::+MMMM  \033[0m \n");
+        echo("\033[01;33m MMMM+:::::::::::--.``````./yNMMMMMMMMMMMMMMMMMhs+////:-.``````.--+MMMM  \033[0m \n");
+        echo("\033[01;33m MMMMmy+::::::::::::--..``````:sdMMMMMMMMMMMdo////////::-.``````:omMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMmh+/::::::::::::-..`````./MMMMMMmho////////:-.``````./smMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMdo/::::::::::::---::/:NMMMy+///////::-.``````-+dMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMmy/::::::::::::///:NMMN://///:-..`````.:sdMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMNho:::::::::///:NMMN:/::-.``````-+hNMMMMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMMMMNmy/:::::////NMMN:-.`````.:sdNMMMMMMMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMMMMMMMMmyo::+sdMMMMMMd+-`./ymMMMMMMMMMMMMMMMMMMMMMMMM  \033[0m \n");
+        echo("\033[01;33m MMMMMMMMMMMMMMMMMMMMMMMMMMMMNMMMMMMMMMMMMNMMMMMMMMMMMMMMMMMMMMMMMMMMMM  \033[0m \n");
+    }
+    public function AntonellaLogo()
+    {
+        echo("\033[01;33m *******************************************************************  \033[0m \n");
+        echo("\033[01;33m *******************************************************************  \033[0m \n");
+        echo("\033[01;33m ***                    _                   _ _                  ***  \033[0m \n");
+        echo("\033[01;33m ***       /\         | |                 | | |                  ***  \033[0m \n");
+        echo("\033[01;33m ***      /  \   _ __ | |_ ___  _ __   ___| | | __ _             ***  \033[0m \n");
+        echo("\033[01;33m ***     / /\ \ | '_ \| __/ _ \| '_ \ / _ \ | |/ _` |            ***  \033[0m \n");
+        echo("\033[01;33m ***    / ____ \| | | | || (_) | | | |  __/ | | (_| |            ***  \033[0m \n");
+        echo("\033[01;33m ***   /_/____\_\_| |_|\__\___/|_| |_|\___|_|_|\__,_|    _       ***  \033[0m \n");
+        echo("\033[01;33m ***   |  ____|                                         | |      ***  \033[0m \n");
+        echo("\033[01;33m ***   | |__ _ __ __ _ _ __ ___   _____      _____  _ __| | __   ***  \033[0m \n");
+        echo("\033[01;33m ***   |  __| '__/ _` | '_ ` _ \ / _ \ \ /\ / / _ \| '__| |/ /   ***  \033[0m \n");
+        echo("\033[01;33m ***   | |  | | | (_| | | | | | |  __/\ V  V / (_) | |  |   <    ***  \033[0m \n");
+        echo("\033[01;33m ***   |_|  |_|  \__,_|_| |_| |_|\___| \_/\_/ \___/|_|  |_|\_\   ***  \033[0m \n");
+        echo("\033[01;33m ***                                                             ***  \033[0m \n");
+        echo("\033[01;33m *******************************************************************  \033[0m \n");
+        echo("\033[01;33m *******************************************************************  \033[0m \n");
+    }
+
+}
+
+$antonella=new Antonella();
+exit($antonella->process($argv));
